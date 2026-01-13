@@ -11,13 +11,23 @@ class LoginScene extends Phaser.Scene {
     }
 
     connectServer() {
-        this.add.text(300, 300, 'Connecting...');
+        this.add.text(300, 300, 'Connecting...', { fontSize: '24px', fill: '#fff' });
         // 确保端口号和你 skynet config 里的 gate 端口一致
         globalSocket = new WebSocket('ws://localhost:8001');
 
         globalSocket.onopen = () => {
             console.log('Connected');
             this.scene.start('GameScene');
+        };
+
+        globalSocket.onerror = (error) => {
+            console.error('WebSocket Error:', error);
+            this.add.text(300, 350, 'Connection Error!', { fontSize: '20px', fill: '#f00' });
+        };
+
+        globalSocket.onclose = (event) => {
+            console.log('WebSocket closed:', event);
+            this.add.text(300, 350, 'Connection Closed!', { fontSize: '20px', fill: '#f00' });
         };
     }
 }
@@ -26,9 +36,13 @@ class GameScene extends Phaser.Scene {
     constructor() { super({ key: 'GameScene' }); }
 
     create() {
+        console.log('GameScene created');
         this.entities = {}; // 存储 id -> {rect, text}
         this.myId = 0;
         this.lastSendTime = 0; // 用于限制发包频率
+
+        // Add debug text to show the scene is running
+        this.add.text(10, 10, 'Game Scene Loaded', { fontSize: '16px', fill: '#fff' });
 
         // 1. 初始化键盘输入 (WASD 和 方向键)
         this.cursors = this.input.keyboard.createCursorKeys();
@@ -36,6 +50,7 @@ class GameScene extends Phaser.Scene {
 
         // 监听消息
         globalSocket.onmessage = (event) => {
+            console.log('Received message:', event.data);
             const msg = JSON.parse(event.data);
             this.handleMessage(msg);
         };
@@ -45,6 +60,7 @@ class GameScene extends Phaser.Scene {
         // 如果你 agent 里处理了 enter_map，请保持。
         // 这里假设发送 login 包含 userid 就能进入
         // 如果你的 agent 需要特定指令，请在此处修改
+        console.log('Sending login request');
         this.send({ cmd: "login", userid: Math.floor(Math.random() * 10000) }); 
     }
 
@@ -95,20 +111,22 @@ class GameScene extends Phaser.Scene {
     }
 
     handleMessage(msg) {
-        // console.log("Recv:", msg); // 调试时可以打开，移动时会刷屏
+        console.log("Recv:", msg); // Enable for debugging
         switch (msg.cmd) {
             case "self_info":
                 this.myId = msg.data.id;
-                console.log("My ID:", this.myId);
+                console.log("My ID:", this.myId, "Data:", msg.data);
                 // 收到自己信息时，确保先添加自己
                 this.addEntity(msg.data); 
                 break;
 
             case "aoi_add":
+                console.log("AOI Add:", msg.entity);
                 this.addEntity(msg.entity);
                 break;
 
             case "aoi_remove":
+                console.log("AOI Remove:", msg.id);
                 this.removeEntity(msg.id);
                 break;
 
@@ -116,11 +134,18 @@ class GameScene extends Phaser.Scene {
             case "entity_move":
                 this.updateEntityPosition(msg.id, msg.x, msg.y);
                 break;
+
+            default:
+                console.log("Unknown message command:", msg.cmd);
         }
     }
 
     addEntity(data) {
-        if (this.entities[data.id]) return;
+        console.log("Adding entity:", data);
+        if (this.entities[data.id]) {
+            console.log("Entity already exists:", data.id);
+            return;
+        }
 
         let color = 0xffffff;
         if (data.type === 'npc') color = 0xff0000; // NPC 红色
@@ -128,10 +153,12 @@ class GameScene extends Phaser.Scene {
             color = (data.id === this.myId) ? 0x00ff00 : 0x0000ff; // 自己绿色，别人蓝色
         }
 
+        console.log("Creating rectangle at:", data.x, data.y, "with color:", color);
         const rect = this.add.rectangle(data.x, data.y, 40, 40, color);
         const text = this.add.text(data.x - 20, data.y - 40, data.type + ":" + data.id, { fontSize: '12px' });
         
         this.entities[data.id] = { rect, text };
+        console.log("Entity added successfully:", data.id);
     }
 
     removeEntity(id) {
