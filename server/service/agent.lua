@@ -56,7 +56,10 @@ skynet.register_protocol {
             
             -- Initialize scene service
             scene = skynet.uniqueservice("scene")
-            pcall(skynet.call, scene, "lua", "init")
+            local ok, err = pcall(skynet.call, scene, "lua", "init")
+            if not ok then
+                skynet.error("Scene init error:", err)
+            end
             
             -- Enter player into scene
             local ret = skynet.call(scene, "lua", "enter", skynet.self(), player_id)
