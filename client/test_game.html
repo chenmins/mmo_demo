@@ -41,6 +41,9 @@
         let ws = null;
         let myId = 0;
         let entities = {}; // id -> {x, y, type, name}
+        let keys = {}; // Track pressed keys
+        let lastSendTime = 0; // Throttle move messages
+        let animationId = null;
         
         function log(msg) {
             statusEl.textContent = msg;
@@ -79,9 +82,62 @@
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '16px Arial';
                 ctx.fillText('Game Scene Loaded - Entities: ' + Object.keys(entities).length, 10, 20);
-                ctx.fillText('Use WASD to move (movement not implemented in this test)', 10, 40);
+                ctx.fillText('Use WASD or Arrow Keys to move', 10, 40);
             }
         }
+        
+        function gameLoop() {
+            if (!myId || !entities[myId]) {
+                animationId = requestAnimationFrame(gameLoop);
+                return;
+            }
+            
+            // Handle movement
+            const speed = 5; // pixels per frame
+            let dx = 0;
+            let dy = 0;
+            
+            if (keys['KeyW'] || keys['ArrowUp']) dy = -speed;
+            if (keys['KeyS'] || keys['ArrowDown']) dy = speed;
+            if (keys['KeyA'] || keys['ArrowLeft']) dx = -speed;
+            if (keys['KeyD'] || keys['ArrowRight']) dx = speed;
+            
+            if (dx !== 0 || dy !== 0) {
+                // Update local position immediately (client prediction)
+                entities[myId].x += dx;
+                entities[myId].y += dy;
+                
+                // Keep player in bounds
+                entities[myId].x = Math.max(20, Math.min(780, entities[myId].x));
+                entities[myId].y = Math.max(20, Math.min(580, entities[myId].y));
+                
+                // Send to server (throttled)
+                const now = Date.now();
+                if (now - lastSendTime > 50) {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            cmd: 'move',
+                            x: Math.floor(entities[myId].x),
+                            y: Math.floor(entities[myId].y)
+                        }));
+                        lastSendTime = now;
+                    }
+                }
+                
+                drawGame();
+            }
+            
+            animationId = requestAnimationFrame(gameLoop);
+        }
+        
+        // Keyboard event handlers
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
         
         function handleMessage(msg) {
             console.log('Received:', msg);
@@ -92,6 +148,10 @@
                     entities[myId] = msg.data;
                     log('Logged in as player ' + myId);
                     drawGame();
+                    // Start game loop after login
+                    if (!animationId) {
+                        animationId = requestAnimationFrame(gameLoop);
+                    }
                     break;
                     
                 case 'aoi_add':
