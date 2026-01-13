@@ -169,6 +169,9 @@ local ENTITY_SIZE = 40  -- Size of player/NPC hitbox (matches client rectangle s
 local COLLISION_DISTANCE = ENTITY_SIZE  -- Minimum distance between entities
 
 -- Check if a position collides with any entity
+-- Note: For production with many entities, consider using spatial partitioning
+-- or the AOI query system for better performance. This linear search is
+-- acceptable for small-scale demos with few entities.
 local function check_collision(moving_id, new_x, new_y)
     for id, ent in pairs(entities) do
         -- Don't check collision with self

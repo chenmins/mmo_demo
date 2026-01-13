@@ -265,6 +265,7 @@ class GameScene extends Phaser.Scene {
 }
 
 // Map constants - must match server configuration
+// Note: For production, consider fetching these from server or using a shared config
 const MAP_WIDTH = 2000;
 const MAP_HEIGHT = 2000;
 
