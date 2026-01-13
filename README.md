@@ -31,7 +31,7 @@ The issue was caused by an incomplete login handler in `server/service/agent.lua
 ### 1. Start the Server
 ```bash
 cd server
-skynet.exe config
+./skynet config
 ```
 
 Expected output: `Gateway Listen on 8001`
