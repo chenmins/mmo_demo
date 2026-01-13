@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Collision Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        #log { border: 1px solid #ccc; padding: 10px; height: 500px; overflow-y: scroll; font-family: monospace; font-size: 12px; margin-top: 10px; }
+        button { margin: 5px; padding: 10px; }
+        .info { background: #e3f2fd; padding: 10px; margin: 10px 0; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>Collision Detection Test</h1>
+    <div class="info">
+        <strong>Instructions:</strong>
+        <ol>
+            <li>Click "Connect and Login" to connect to server</li>
+            <li>Try to move towards the Guard NPC at (200, 200)</li>
+            <li>Watch for collision detection messages</li>
+        </ol>
+        <p><strong>NPC Positions:</strong> Guard (200, 200), Villager (400, 300), Merchant (600, 200)</p>
+    </div>
+    
+    <button id="connect">Connect and Login</button>
+    <button id="moveToGuard" disabled>Move Towards Guard</button>
+    <button id="testCollision" disabled>Test Collision (move very close to Guard)</button>
+    <button id="moveAway" disabled>Move Away</button>
+    
+    <div id="log"></div>
+    
+    <script>
+        const logDiv = document.getElementById('log');
+        let ws = null;
+        let playerPos = { x: 0, y: 0 };
+        
+        function log(msg, style = '') {
+            const line = document.createElement('div');
+            line.textContent = new Date().toLocaleTimeString() + ': ' + msg;
+            if (style) line.style.cssText = style;
+            logDiv.appendChild(line);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function enableButtons() {
+            document.getElementById('moveToGuard').disabled = false;
+            document.getElementById('testCollision').disabled = false;
+            document.getElementById('moveAway').disabled = false;
+        }
+        
+        function sendMove(x, y) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const msg = JSON.stringify({ cmd: "move", x: x, y: y });
+                log('→ Moving to (' + x + ', ' + y + ')');
+                ws.send(msg);
+            }
+        }
+        
+        document.getElementById('connect').addEventListener('click', function() {
+            log('Connecting to ws://localhost:8001...', 'font-weight: bold; color: blue;');
+            ws = new WebSocket('ws://localhost:8001');
+            
+            ws.onopen = function() {
+                log('✓ Connected!', 'color: green; font-weight: bold;');
+                const loginMsg = JSON.stringify({cmd: "login", userid: Math.floor(Math.random() * 10000)});
+                log('Sending: ' + loginMsg);
+                ws.send(loginMsg);
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                log('← Received: ' + event.data);
+                
+                if (data.cmd === 'self_info') {
+                    playerPos = { x: data.data.x, y: data.data.y };
+                    log('✓ Player spawned at (' + playerPos.x + ', ' + playerPos.y + ')', 'color: green; font-weight: bold;');
+                    enableButtons();
+                } else if (data.cmd === 'entity_move') {
+                    if (data.x === playerPos.x && data.y === playerPos.y) {
+                        log('⚠ Server rejected move - COLLISION DETECTED!', 'color: red; font-weight: bold; font-size: 14px;');
+                    } else {
+                        playerPos = { x: data.x, y: data.y };
+                        log('✓ Position updated to (' + data.x + ', ' + data.y + ')');
+                    }
+                }
+            };
+            
+            ws.onerror = function(error) {
+                log('✗ Error', 'color: red;');
+            };
+            
+            ws.onclose = function(event) {
+                log('✗ Connection closed: ' + event.code, 'color: red;');
+            };
+        });
+        
+        document.getElementById('moveToGuard').addEventListener('click', function() {
+            // Guard is at (200, 200), move close but not too close
+            const targetX = 200 + 60; // 60 pixels away
+            const targetY = 200 + 60;
+            sendMove(targetX, targetY);
+        });
+        
+        document.getElementById('testCollision').addEventListener('click', function() {
+            // Try to move exactly to Guard position - should be blocked
+            log('=== TESTING COLLISION: Trying to move to Guard position (200, 200) ===', 'background: yellow; font-weight: bold; padding: 5px;');
+            sendMove(200, 200);
+        });
+        
+        document.getElementById('moveAway').addEventListener('click', function() {
+            // Move to safe position far from NPCs
+            sendMove(800, 800);
+        });
+    </script>
+</body>
+</html>

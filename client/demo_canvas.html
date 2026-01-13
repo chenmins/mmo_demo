@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>MMO Demo - Camera & Minimap</title>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            background: #000; 
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        #container {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            margin: 20px auto;
+            background: #1a1a1a;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        #mainCanvas {
+            border: 2px solid #444;
+        }
+        #minimap {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            border: 3px solid #fff;
+            background: #000;
+        }
+        #info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #fff;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        #controls {
+            text-align: center;
+            color: #fff;
+            padding: 10px;
+            background: #333;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .status {
+            display: inline-block;
+            margin: 0 10px;
+            padding: 5px 10px;
+            border-radius: 3px;
+        }
+        .connected { background: #4caf50; color: white; }
+        .disconnected { background: #f44336; color: white; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h2 style="margin: 10px 0;">MMO Demo - Camera System & Minimap</h2>
+        <button id="connect">Connect and Login</button>
+        <span id="status" class="status disconnected">Disconnected</span>
+        <div style="margin-top: 10px;">
+            <strong>Controls:</strong> WASD or Arrow Keys to move | 
+            <strong>Features:</strong> Camera follows player | Minimap shows full map | Collision detection active
+        </div>
+    </div>
+    
+    <div id="container">
+        <canvas id="mainCanvas" width="800" height="600"></canvas>
+        <canvas id="minimap" width="200" height="200"></canvas>
+        <div id="info">
+            Position: <span id="posText">-</span><br>
+            Entities visible: <span id="entitiesText">0</span><br>
+            Camera: Following player
+        </div>
+    </div>
+    
+    <script>
+        // Map constants
+        const MAP_WIDTH = 2000;
+        const MAP_HEIGHT = 2000;
+        const VIEWPORT_WIDTH = 800;
+        const VIEWPORT_HEIGHT = 600;
+        const MINIMAP_SIZE = 200;
+        
+        // Game state
+        let ws = null;
+        let myId = null;
+        let entities = {};
+        let camera = { x: 0, y: 0 };
+        let keys = {};
+        
+        // Canvas contexts
+        const mainCanvas = document.getElementById('mainCanvas');
+        const mainCtx = mainCanvas.getContext('2d');
+        const minimapCanvas = document.getElementById('minimap');
+        const minimapCtx = minimapCanvas.getContext('2d');
+        
+        // Input handling
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            keys[e.key] = true;
+        });
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+            keys[e.key] = false;
+        });
+        
+        // Connect button
+        document.getElementById('connect').addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) return;
+            
+            ws = new WebSocket('ws://localhost:8001');
+            
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('status').className = 'status connected';
+                ws.send(JSON.stringify({ 
+                    cmd: "login", 
+                    userid: Math.floor(Math.random() * 10000) 
+                }));
+            };
+            
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('status').textContent = 'Disconnected';
+                document.getElementById('status').className = 'status disconnected';
+            };
+        });
+        
+        function handleMessage(msg) {
+            switch(msg.cmd) {
+                case 'self_info':
+                    myId = msg.data.id;
+                    entities[myId] = msg.data;
+                    camera.x = msg.data.x;
+                    camera.y = msg.data.y;
+                    break;
+                    
+                case 'aoi_add':
+                    entities[msg.entity.id] = msg.entity;
+                    break;
+                    
+                case 'aoi_remove':
+                    delete entities[msg.id];
+                    break;
+                    
+                case 'entity_move':
+                    if (entities[msg.id]) {
+                        entities[msg.id].x = msg.x;
+                        entities[msg.id].y = msg.y;
+                        
+                        // Update camera if it's the player
+                        if (msg.id === myId) {
+                            camera.x = msg.x;
+                            camera.y = msg.y;
+                        }
+                    }
+                    break;
+            }
+        }
+        
+        // Game loop
+        let lastMoveTime = 0;
+        function gameLoop() {
+            // Handle input
+            if (myId && entities[myId]) {
+                const speed = 200 / 60; // pixels per frame at 60fps
+                let dx = 0, dy = 0;
+                
+                if (keys['a'] || keys['ArrowLeft']) dx = -speed;
+                if (keys['d'] || keys['ArrowRight']) dx = speed;
+                if (keys['w'] || keys['ArrowUp']) dy = -speed;
+                if (keys['s'] || keys['ArrowDown']) dy = speed;
+                
+                if (dx !== 0 || dy !== 0) {
+                    let newX = entities[myId].x + dx;
+                    let newY = entities[myId].y + dy;
+                    
+                    // Keep within bounds
+                    newX = Math.max(20, Math.min(MAP_WIDTH - 20, newX));
+                    newY = Math.max(20, Math.min(MAP_HEIGHT - 20, newY));
+                    
+                    // Client-side prediction
+                    entities[myId].x = newX;
+                    entities[myId].y = newY;
+                    camera.x = newX;
+                    camera.y = newY;
+                    
+                    // Send to server (throttled)
+                    const now = Date.now();
+                    if (now - lastMoveTime > 50) {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({
+                                cmd: "move",
+                                x: Math.floor(newX),
+                                y: Math.floor(newY)
+                            }));
+                        }
+                        lastMoveTime = now;
+                    }
+                }
+            }
+            
+            // Render
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function render() {
+            // Clear main canvas
+            mainCtx.fillStyle = '#2d2d2d';
+            mainCtx.fillRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+            
+            // Calculate camera offset (center on player)
+            const offsetX = VIEWPORT_WIDTH / 2 - camera.x;
+            const offsetY = VIEWPORT_HEIGHT / 2 - camera.y;
+            
+            // Draw grid on main canvas
+            mainCtx.strokeStyle = '#333';
+            mainCtx.lineWidth = 1;
+            for (let x = 0; x < MAP_WIDTH; x += 100) {
+                const screenX = x + offsetX;
+                if (screenX >= 0 && screenX <= VIEWPORT_WIDTH) {
+                    mainCtx.beginPath();
+                    mainCtx.moveTo(screenX, 0);
+                    mainCtx.lineTo(screenX, VIEWPORT_HEIGHT);
+                    mainCtx.stroke();
+                }
+            }
+            for (let y = 0; y < MAP_HEIGHT; y += 100) {
+                const screenY = y + offsetY;
+                if (screenY >= 0 && screenY <= VIEWPORT_HEIGHT) {
+                    mainCtx.beginPath();
+                    mainCtx.moveTo(0, screenY);
+                    mainCtx.lineTo(VIEWPORT_WIDTH, screenY);
+                    mainCtx.stroke();
+                }
+            }
+            
+            // Draw entities on main canvas
+            let visibleCount = 0;
+            for (let id in entities) {
+                const ent = entities[id];
+                const screenX = ent.x + offsetX;
+                const screenY = ent.y + offsetY;
+                
+                // Only draw if in viewport
+                if (screenX >= -40 && screenX <= VIEWPORT_WIDTH + 40 &&
+                    screenY >= -40 && screenY <= VIEWPORT_HEIGHT + 40) {
+                    
+                    visibleCount++;
+                    
+                    // Draw entity
+                    if (ent.type === 'npc') {
+                        mainCtx.fillStyle = '#ff0000';
+                    } else if (id == myId) {
+                        mainCtx.fillStyle = '#0000ff';
+                    } else {
+                        mainCtx.fillStyle = '#00ff00';
+                    }
+                    
+                    mainCtx.fillRect(screenX - 20, screenY - 20, 40, 40);
+                    
+                    // Draw label
+                    mainCtx.fillStyle = '#fff';
+                    mainCtx.font = '12px Arial';
+                    mainCtx.textAlign = 'center';
+                    const label = ent.name || (ent.type + ':' + id);
+                    mainCtx.fillText(label, screenX, screenY - 25);
+                }
+            }
+            
+            // Update info
+            if (myId && entities[myId]) {
+                document.getElementById('posText').textContent = 
+                    `(${Math.floor(entities[myId].x)}, ${Math.floor(entities[myId].y)})`;
+            }
+            document.getElementById('entitiesText').textContent = visibleCount;
+            
+            // Render minimap
+            renderMinimap();
+        }
+        
+        function renderMinimap() {
+            // Clear minimap
+            minimapCtx.fillStyle = '#000';
+            minimapCtx.fillRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+            
+            // Draw grid on minimap
+            minimapCtx.strokeStyle = '#222';
+            minimapCtx.lineWidth = 0.5;
+            const scale = MINIMAP_SIZE / MAP_WIDTH;
+            for (let x = 0; x < MAP_WIDTH; x += 200) {
+                minimapCtx.beginPath();
+                minimapCtx.moveTo(x * scale, 0);
+                minimapCtx.lineTo(x * scale, MINIMAP_SIZE);
+                minimapCtx.stroke();
+            }
+            for (let y = 0; y < MAP_HEIGHT; y += 200) {
+                minimapCtx.beginPath();
+                minimapCtx.moveTo(0, y * scale);
+                minimapCtx.lineTo(MINIMAP_SIZE, y * scale);
+                minimapCtx.stroke();
+            }
+            
+            // Draw all entities on minimap
+            for (let id in entities) {
+                const ent = entities[id];
+                const mmX = ent.x * scale;
+                const mmY = ent.y * scale;
+                
+                if (ent.type === 'npc') {
+                    minimapCtx.fillStyle = '#ff0000';
+                    minimapCtx.fillRect(mmX - 2, mmY - 2, 4, 4);
+                } else if (id == myId) {
+                    minimapCtx.fillStyle = '#0000ff';
+                    minimapCtx.fillRect(mmX - 3, mmY - 3, 6, 6);
+                } else {
+                    minimapCtx.fillStyle = '#00ff00';
+                    minimapCtx.fillRect(mmX - 2, mmY - 2, 4, 4);
+                }
+            }
+            
+            // Draw camera viewport on minimap
+            if (myId) {
+                minimapCtx.strokeStyle = '#ffff00';
+                minimapCtx.lineWidth = 1;
+                const vpWidth = VIEWPORT_WIDTH * scale;
+                const vpHeight = VIEWPORT_HEIGHT * scale;
+                const vpX = (camera.x - VIEWPORT_WIDTH / 2) * scale;
+                const vpY = (camera.y - VIEWPORT_HEIGHT / 2) * scale;
+                minimapCtx.strokeRect(vpX, vpY, vpWidth, vpHeight);
+            }
+        }
+        
+        // Start game loop
+        gameLoop();
+    </script>
+</body>
+</html>
