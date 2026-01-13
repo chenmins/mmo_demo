@@ -5,6 +5,7 @@ local client_fd
 local gateway
 local scene 
 local my_id
+local player_id
 
 local CMD = {}
 
@@ -16,6 +17,9 @@ function CMD.start(fd, gate, id)
 end
 
 function CMD.disconnect()
+    if scene and player_id then
+        skynet.call(scene, "lua", "leave", player_id)
+    end
     skynet.exit()
 end
 
@@ -46,10 +50,18 @@ skynet.register_protocol {
         local req = yyjson.decode(msg)
         
         if req.cmd == "login" then
-            -- ... (登录逻辑保持不变)
+            -- Extract player_id from request
+            player_id = req.userid or math.random(10000, 99999)
+            skynet.error("Player login. ID:", player_id)
+            
+            -- Initialize scene service
+            scene = skynet.uniqueservice("scene")
+            pcall(skynet.call, scene, "lua", "init")
+            
+            -- Enter player into scene
             local ret = skynet.call(scene, "lua", "enter", skynet.self(), player_id)
             if ret then
-                print("Login success, entering scene")
+                skynet.error("Login success, entering scene")
             end
 
         -- 【新增】处理移动请求
