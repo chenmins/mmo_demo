@@ -27,7 +27,7 @@ local my_id
 local player_id  -- Added this line
 ```
 
-#### Implemented complete login handler:
+#### Implemented complete login handler with error handling:
 ```lua
 if req.cmd == "login" then
     -- Extract player_id from request
@@ -36,7 +36,10 @@ if req.cmd == "login" then
     
     -- Initialize scene service
     scene = skynet.uniqueservice("scene")
-    pcall(skynet.call, scene, "lua", "init")
+    local ok, err = pcall(skynet.call, scene, "lua", "init")
+    if not ok then
+        skynet.error("Scene init error:", err)
+    end
     
     -- Enter player into scene
     local ret = skynet.call(scene, "lua", "enter", skynet.self(), player_id)
@@ -57,7 +60,15 @@ end
 
 ### 2. Enhanced `client/src/game.js` for debugging
 
-Added comprehensive logging and error handling:
+Added comprehensive logging and error handling with a DEBUG flag for production control:
+
+#### Debug flag control:
+```javascript
+// Debug flag - set to false in production to reduce logging
+const DEBUG = true;
+```
+
+All debug logging is now wrapped with `if (DEBUG)` checks to allow easy toggling for production use.
 
 #### WebSocket error handling:
 ```javascript
