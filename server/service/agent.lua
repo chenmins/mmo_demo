@@ -27,11 +27,13 @@ function CMD.client_msg(msg_str)
     skynet.error("client msg:", msg_str)
     
     -- 2. 使用 yyjson.decode
-    local ok, msg = pcall(yyjson.decode, msg_str)
+    local ok, err_or_msg = pcall(yyjson.decode, msg_str)
     if not ok then
-        skynet.error("JSON decode error:", msg)
+        skynet.error("JSON decode failed:", err_or_msg)
         return
     end
+    
+    local msg = err_or_msg
 
     if msg.cmd == "enter_map" then
         scene = skynet.uniqueservice("scene")
