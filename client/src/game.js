@@ -150,7 +150,7 @@ class GameScene extends Phaser.Scene {
         let color = 0xffffff;
         if (data.type === 'npc') color = 0xff0000; // NPC 红色
         if (data.type === 'player') {
-            color = (data.id === this.myId) ? 0x00ff00 : 0x0000ff; // 自己绿色，别人蓝色
+            color = (data.id === this.myId) ? 0x0000ff : 0x00ff00; // 自己蓝色，别人绿色
         }
 
         console.log("Creating rectangle at:", data.x, data.y, "with color:", color);
