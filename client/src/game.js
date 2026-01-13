@@ -44,9 +44,30 @@ class GameScene extends Phaser.Scene {
         this.myId = 0;
         this.lastSendTime = 0; // 用于限制发包频率
 
-        // Add debug text to show the scene is running
+        // Setup camera system - follow player with map bounds
+        this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
+        
+        // Draw map background/boundaries for visual reference
+        const mapBorder = this.add.graphics();
+        mapBorder.lineStyle(4, 0x444444, 1);
+        mapBorder.strokeRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+        
+        // Add grid for better spatial reference
+        mapBorder.lineStyle(1, 0x333333, 0.3);
+        for (let x = 0; x < MAP_WIDTH; x += 100) {
+            mapBorder.lineBetween(x, 0, x, MAP_HEIGHT);
+        }
+        for (let y = 0; y < MAP_HEIGHT; y += 100) {
+            mapBorder.lineBetween(0, y, MAP_WIDTH, y);
+        }
+
+        // Setup minimap in top-right corner
+        this.setupMinimap();
+
+        // Add debug text to show the scene is running (fixed position on screen)
         if (DEBUG) {
-            this.add.text(10, 10, 'Game Scene Loaded', { fontSize: '16px', fill: '#fff' });
+            this.add.text(10, 10, 'Game Scene Loaded', { fontSize: '16px', fill: '#fff' })
+                .setScrollFactor(0); // Fixed on screen
         }
 
         // 1. 初始化键盘输入 (WASD 和 方向键)
@@ -61,12 +82,38 @@ class GameScene extends Phaser.Scene {
         };
 
         // 发送进入地图指令
-        // 注意：根据之前的 agent 逻辑，登录后可能需要先发 login 协议，
-        // 如果你 agent 里处理了 enter_map，请保持。
-        // 这里假设发送 login 包含 userid 就能进入
-        // 如果你的 agent 需要特定指令，请在此处修改
         if (DEBUG) console.log('Sending login request');
         this.send({ cmd: "login", userid: Math.floor(Math.random() * 10000) }); 
+    }
+
+    setupMinimap() {
+        // Minimap configuration
+        const minimapWidth = 200;
+        const minimapHeight = 200;
+        const minimapX = this.cameras.main.width - minimapWidth - 10;
+        const minimapY = 10;
+        
+        // Create minimap camera
+        this.minimapCamera = this.cameras.add(minimapX, minimapY, minimapWidth, minimapHeight);
+        this.minimapCamera.setZoom(minimapWidth / MAP_WIDTH); // Scale to show full map
+        this.minimapCamera.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
+        this.minimapCamera.setBackgroundColor(0x000000);
+        
+        // Create minimap border (fixed on screen)
+        const border = this.add.graphics();
+        border.lineStyle(3, 0xffffff, 1);
+        border.strokeRect(minimapX - 2, minimapY - 2, minimapWidth + 4, minimapHeight + 4);
+        border.setScrollFactor(0);
+        border.setDepth(1000);
+        
+        // Store minimap info for updates
+        this.minimapInfo = {
+            camera: this.minimapCamera,
+            x: minimapX,
+            y: minimapY,
+            width: minimapWidth,
+            height: minimapHeight
+        };
     }
 
     // 2. 游戏主循环：每一帧都会运行
@@ -88,12 +135,23 @@ class GameScene extends Phaser.Scene {
         if (dx !== 0 || dy !== 0) {
             const myEntity = this.entities[this.myId];
             
+            // Calculate new position
+            let newX = myEntity.rect.x + dx;
+            let newY = myEntity.rect.y + dy;
+            
+            // Keep player within map bounds
+            newX = Math.max(20, Math.min(MAP_WIDTH - 20, newX));
+            newY = Math.max(20, Math.min(MAP_HEIGHT - 20, newY));
+            
             // --- 客户端先行预测 (Client Prediction) ---
             // 立即移动自己的方块，不用等服务器回复，这样感觉流畅
-            myEntity.rect.x += dx;
-            myEntity.rect.y += dy;
+            myEntity.rect.x = newX;
+            myEntity.rect.y = newY;
             // 更新文字位置
-            myEntity.text.setPosition(myEntity.rect.x - 20, myEntity.rect.y - 40);
+            myEntity.text.setPosition(newX - 20, newY - 40);
+
+            // Update camera to follow player
+            this.cameras.main.centerOn(newX, newY);
 
             // --- 发送请求给服务器 ---
             // 限制发送频率，避免每帧都发 (例如每 50ms 发一次)
@@ -101,8 +159,8 @@ class GameScene extends Phaser.Scene {
             if (now - this.lastSendTime > 50) {
                 this.send({ 
                     cmd: "move", 
-                    x: Math.floor(myEntity.rect.x), 
-                    y: Math.floor(myEntity.rect.y) 
+                    x: Math.floor(newX), 
+                    y: Math.floor(newY) 
                 });
                 this.lastSendTime = now;
             }
@@ -163,6 +221,13 @@ class GameScene extends Phaser.Scene {
         const text = this.add.text(data.x - 20, data.y - 40, data.type + ":" + data.id, { fontSize: '12px' });
         
         this.entities[data.id] = { rect, text };
+        
+        // If this is the player, center camera on them
+        if (data.id === this.myId) {
+            this.cameras.main.centerOn(data.x, data.y);
+            if (DEBUG) console.log("Camera centered on player at:", data.x, data.y);
+        }
+        
         if (DEBUG) console.log("Entity added successfully:", data.id);
     }
 
@@ -198,6 +263,10 @@ class GameScene extends Phaser.Scene {
         }
     }
 }
+
+// Map constants - must match server configuration
+const MAP_WIDTH = 2000;
+const MAP_HEIGHT = 2000;
 
 const config = {
     type: Phaser.AUTO,

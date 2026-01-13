@@ -164,9 +164,65 @@ local function broadcast_move(who_id, x, y)
     end
 end
 
+-- Collision detection constants
+local ENTITY_SIZE = 40  -- Size of player/NPC hitbox (matches client rectangle size)
+local COLLISION_DISTANCE = ENTITY_SIZE  -- Minimum distance between entities
+
+-- Check if a position collides with any entity
+local function check_collision(moving_id, new_x, new_y)
+    for id, ent in pairs(entities) do
+        -- Don't check collision with self
+        if id ~= moving_id then
+            local dx = new_x - ent.x
+            local dy = new_y - ent.y
+            local distance = math.sqrt(dx * dx + dy * dy)
+            
+            -- If too close, there's a collision
+            if distance < COLLISION_DISTANCE then
+                return true, id  -- Collision detected
+            end
+        end
+    end
+    return false  -- No collision
+end
+
 function CMD.move(player_id, x, y)
     local p = entities[player_id]
     if not p then return end
+
+    -- Check map boundaries
+    if x < 20 or x > MAP_WIDTH - 20 or y < 20 or y > MAP_HEIGHT - 20 then
+        -- Out of bounds - send correction to client
+        local correction_msg = {
+            cmd = "entity_move",
+            id = player_id,
+            x = p.x,
+            y = p.y
+        }
+        local agent = agents[player_id]
+        if agent then
+            skynet.send(agent, "lua", "send", yyjson.encode(correction_msg))
+        end
+        return
+    end
+
+    -- Check collision with other entities
+    local has_collision, collided_with = check_collision(player_id, x, y)
+    if has_collision then
+        -- Collision detected - send position correction back to client
+        skynet.error("Collision detected for player", player_id, "with entity", collided_with)
+        local correction_msg = {
+            cmd = "entity_move",
+            id = player_id,
+            x = p.x,
+            y = p.y
+        }
+        local agent = agents[player_id]
+        if agent then
+            skynet.send(agent, "lua", "send", yyjson.encode(correction_msg))
+        end
+        return
+    end
 
     -- 1. 更新内存数据
     p.x = x
