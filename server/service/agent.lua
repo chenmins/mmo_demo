@@ -1,0 +1,72 @@
+local skynet = require "skynet"
+local yyjson = require "yyjson" -- 1. 引入 yyjson
+
+local client_fd
+local gateway
+local scene 
+local my_id
+
+local CMD = {}
+
+function CMD.start(fd, gate, id)
+    client_fd = fd
+    gateway = gate
+    my_id = id or math.random(10000, 99999)
+    skynet.error("Agent start. ID:", my_id)
+end
+
+function CMD.disconnect()
+    skynet.exit()
+end
+
+function CMD.client_msg(msg_str)
+    -- 2. 使用 yyjson.decode
+    local ok, msg = pcall(yyjson.decode, msg_str)
+    if not ok then return end
+
+    if msg.cmd == "enter_map" then
+        scene = skynet.uniqueservice("scene")
+        pcall(skynet.call, scene, "lua", "init") 
+        skynet.call(scene, "lua", "enter", skynet.self(), my_id)
+    end
+end
+
+function CMD.send(json_str)
+    skynet.call(gateway, "lua", "send_to_client", client_fd, json_str)
+end
+ 
+skynet.register_protocol {
+    name = "client",
+    id = skynet.PTYPE_CLIENT,
+    unpack = skynet.tostring,
+    dispatch = function(fd, source, msg)
+        skynet.ignoreret()
+        -- print("client msg:", msg)
+        
+        local req = yyjson.decode(msg)
+        
+        if req.cmd == "login" then
+            -- ... (登录逻辑保持不变)
+            local ret = skynet.call(scene, "lua", "enter", skynet.self(), player_id)
+            if ret then
+                print("Login success, entering scene")
+            end
+
+        -- 【新增】处理移动请求
+        elseif req.cmd == "move" then
+            -- 直接通知 scene 移动，不需要等待返回 (send)
+            -- 实际项目中这里应该做防作弊检查（速度校验等）
+            skynet.send(scene, "lua", "move", player_id, req.x, req.y)
+        end
+    end
+}
+
+
+skynet.start(function()
+    skynet.dispatch("lua", function(_, _, cmd, ...)
+        local f = CMD[cmd]
+        if f then
+            f(...)
+        end
+    end)
+end)
