@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Test</h1>
+    <button id="connect">Connect and Login</button>
+    <div id="log" style="border: 1px solid #ccc; padding: 10px; margin-top: 10px; height: 400px; overflow-y: scroll; font-family: monospace; font-size: 12px;"></div>
+    
+    <script>
+        const logDiv = document.getElementById('log');
+        function log(msg) {
+            const line = document.createElement('div');
+            line.textContent = new Date().toLocaleTimeString() + ': ' + msg;
+            logDiv.appendChild(line);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        document.getElementById('connect').addEventListener('click', function() {
+            log('Connecting to ws://localhost:8001...');
+            const ws = new WebSocket('ws://localhost:8001');
+            
+            ws.onopen = function() {
+                log('✓ Connected!');
+                const loginMsg = JSON.stringify({cmd: "login", userid: 12345});
+                log('Sending: ' + loginMsg);
+                ws.send(loginMsg);
+            };
+            
+            ws.onmessage = function(event) {
+                log('← Received: ' + event.data);
+            };
+            
+            ws.onerror = function(error) {
+                log('✗ Error: ' + error);
+            };
+            
+            ws.onclose = function(event) {
+                log('✗ Connection closed: ' + event.code + ' ' + event.reason);
+            };
+        });
+    </script>
+</body>
+</html>

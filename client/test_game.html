@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>MMO Demo - Test Without Phaser CDN</title>
+    <style>
+        body { margin: 0; padding: 0; background: #2d2d2d; color: #fff; font-family: Arial, sans-serif; }
+        #gameCanvas { 
+            border: 2px solid #fff; 
+            background: #2d2d2d;
+            display: block;
+            margin: 20px auto;
+        }
+        .info {
+            text-align: center;
+            padding: 20px;
+        }
+        .controls {
+            text-align: center;
+            padding: 10px;
+            background: #444;
+        }
+    </style>
+</head>
+<body>
+    <div class="info">
+        <h1>MMO Demo - Simple Canvas Test</h1>
+        <p>This test uses simple Canvas instead of Phaser to verify the server communication</p>
+    </div>
+    <div class="controls">
+        <button id="loginBtn">Click to Login</button>
+        <span id="status">Not connected</span>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+        
+        let ws = null;
+        let myId = 0;
+        let entities = {}; // id -> {x, y, type, name}
+        let keys = {}; // Track pressed keys
+        let lastSendTime = 0; // Throttle move messages
+        let animationId = null;
+        
+        function log(msg) {
+            statusEl.textContent = msg;
+            console.log(msg);
+        }
+        
+        function drawGame() {
+            // Clear canvas
+            ctx.fillStyle = '#2d2d2d';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw all entities
+            for (let id in entities) {
+                const entity = entities[id];
+                
+                // Set color based on type
+                if (entity.type === 'npc') {
+                    ctx.fillStyle = '#ff0000'; // Red for NPCs
+                } else if (id == myId) {
+                    ctx.fillStyle = '#0000ff'; // Blue for self
+                } else {
+                    ctx.fillStyle = '#00ff00'; // Green for other players
+                }
+                
+                // Draw square
+                ctx.fillRect(entity.x - 20, entity.y - 20, 40, 40);
+                
+                // Draw label
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '12px Arial';
+                ctx.fillText(entity.type + ':' + id, entity.x - 20, entity.y - 30);
+            }
+            
+            // Draw instructions
+            if (Object.keys(entities).length > 0) {
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '16px Arial';
+                ctx.fillText('Game Scene Loaded - Entities: ' + Object.keys(entities).length, 10, 20);
+                ctx.fillText('Use WASD or Arrow Keys to move', 10, 40);
+            }
+        }
+        
+        function gameLoop() {
+            if (!myId || !entities[myId]) {
+                animationId = requestAnimationFrame(gameLoop);
+                return;
+            }
+            
+            // Handle movement
+            const speed = 5; // pixels per frame
+            let dx = 0;
+            let dy = 0;
+            
+            if (keys['KeyW'] || keys['ArrowUp']) dy = -speed;
+            if (keys['KeyS'] || keys['ArrowDown']) dy = speed;
+            if (keys['KeyA'] || keys['ArrowLeft']) dx = -speed;
+            if (keys['KeyD'] || keys['ArrowRight']) dx = speed;
+            
+            if (dx !== 0 || dy !== 0) {
+                // Update local position immediately (client prediction)
+                entities[myId].x += dx;
+                entities[myId].y += dy;
+                
+                // Keep player in bounds
+                entities[myId].x = Math.max(20, Math.min(780, entities[myId].x));
+                entities[myId].y = Math.max(20, Math.min(580, entities[myId].y));
+                
+                // Send to server (throttled)
+                const now = Date.now();
+                if (now - lastSendTime > 50) {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            cmd: 'move',
+                            x: Math.floor(entities[myId].x),
+                            y: Math.floor(entities[myId].y)
+                        }));
+                        lastSendTime = now;
+                    }
+                }
+                
+                drawGame();
+            }
+            
+            animationId = requestAnimationFrame(gameLoop);
+        }
+        
+        // Keyboard event handlers
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+        
+        function handleMessage(msg) {
+            console.log('Received:', msg);
+            
+            switch (msg.cmd) {
+                case 'self_info':
+                    myId = msg.data.id;
+                    entities[myId] = msg.data;
+                    log('Logged in as player ' + myId);
+                    drawGame();
+                    // Start game loop after login
+                    if (!animationId) {
+                        animationId = requestAnimationFrame(gameLoop);
+                    }
+                    break;
+                    
+                case 'aoi_add':
+                    entities[msg.entity.id] = msg.entity;
+                    log('Entity added: ' + msg.entity.type + ' ' + msg.entity.id);
+                    drawGame();
+                    break;
+                    
+                case 'aoi_remove':
+                    delete entities[msg.id];
+                    log('Entity removed: ' + msg.id);
+                    drawGame();
+                    break;
+                    
+                case 'entity_move':
+                    if (entities[msg.id]) {
+                        entities[msg.id].x = msg.x;
+                        entities[msg.id].y = msg.y;
+                        drawGame();
+                    }
+                    break;
+            }
+        }
+        
+        document.getElementById('loginBtn').addEventListener('click', function() {
+            log('Connecting to ws://localhost:8001...');
+            ws = new WebSocket('ws://localhost:8001');
+            
+            ws.onopen = function() {
+                log('Connected! Sending login...');
+                const loginMsg = JSON.stringify({
+                    cmd: 'login',
+                    userid: Math.floor(Math.random() * 10000)
+                });
+                ws.send(loginMsg);
+            };
+            
+            ws.onmessage = function(event) {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+            
+            ws.onerror = function(error) {
+                log('WebSocket Error!');
+                console.error(error);
+            };
+            
+            ws.onclose = function(event) {
+                log('Connection closed');
+            };
+        });
+        
+        // Draw initial canvas
+        drawGame();
+    </script>
+</body>
+</html>

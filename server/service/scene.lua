@@ -29,12 +29,16 @@ local function handle_aoi_events()
     -- 获取事件列表
     local count = aoi_space:update_event(events)
     
+    skynet.error("AOI events count:", count or 0)
+    
     if count and count > 0 then
         -- 事件格式：[watcher, marker, type, watcher, marker, type, ...]
         for i = 1, count, 3 do
             local watcher_id = events[i]
             local marker_id = events[i+1]
             local event_type = events[i+2]
+            
+            skynet.error("AOI event:", watcher_id, "sees", marker_id, "type:", event_type)
 
             -- 我们只关心把消息发给 watcher (观察者)
             local watcher_agent = agents[watcher_id]
@@ -44,12 +48,18 @@ local function handle_aoi_events()
                     local ent = entities[marker_id]
                     if ent then
                         local msg = { cmd = "aoi_add", entity = ent }
-                        skynet.send(watcher_agent, "lua", "send", yyjson.encode(msg))
+                        local json_msg = yyjson.encode(msg)
+                        skynet.error("Sending aoi_add to", watcher_id, ":", json_msg)
+                        skynet.send(watcher_agent, "lua", "send", json_msg)
+                    else
+                        skynet.error("Entity not found for marker_id:", marker_id)
                     end
                 elseif event_type == EVENT_LEAVE then
                     local msg = { cmd = "aoi_remove", id = marker_id }
                     skynet.send(watcher_agent, "lua", "send", yyjson.encode(msg))
                 end
+            else
+                skynet.error("Watcher agent not found for watcher_id:", watcher_id)
             end
         end
     end
@@ -108,14 +118,18 @@ function CMD.enter(agent_handle, player_id)
         cmd = "self_info",
         data = entities[player_id]
     }
-    skynet.send(agent_handle, "lua", "send", yyjson.encode(self_info))
+    local json_msg = yyjson.encode(self_info)
+    skynet.error("Sending self_info to player", player_id, ":", json_msg)
+    skynet.send(agent_handle, "lua", "send", json_msg)
 
     -- 3. 插入玩家
     -- 玩家既看别人也被别人看 (MODE_BOTH)
     -- 视野范围 VIEW_WIDTH x VIEW_HEIGHT
+    skynet.error("Inserting player into AOI:", player_id, x, y)
     aoi_space:insert(player_id, x, y, VIEW_WIDTH, VIEW_HEIGHT, 0, MODE_BOTH)
     
     -- 4. 处理插入后产生的 Enter 事件
+    skynet.error("Handling AOI events for player:", player_id)
     handle_aoi_events()
     
     return true
