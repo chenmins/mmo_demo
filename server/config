@@ -5,9 +5,11 @@ harbor = 0
 start = "main"  -- 启动 main.lua
 bootstrap = "snlua bootstrap"
 
--- 路径配置
-luaservice = root.."service/?.lua;"..root.."skynet/service/?.lua"
-lualib = root.."lualib/?.lua;"..root.."skynet/lualib/?.lua"
+-- 路径配置 (Path Configuration)
+-- 游戏逻辑文件在 game 文件夹，skynet 框架文件在各自的文件夹
+-- Game logic files in game folder, skynet framework files in their own folders
+luaservice = root.."game/service/?.lua;"..root.."service/?.lua;"..root.."skynet/service/?.lua"
+lualib = root.."game/lualib/?.lua;"..root.."lualib/?.lua;"..root.."skynet/lualib/?.lua"
 -- 注意：这里假设你把 skynet 源码放在了 server/skynet 目录下，或者你需要修改路径指向你的 skynet 安装目录
 -- 另外加入了 luaclib 目录以便加载 aoi.so
 lua_cpath = root.."luaclib/?.so;"..root.."skynet/luaclib/?.so"
