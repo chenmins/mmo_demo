@@ -24,28 +24,43 @@ local EVENT_LEAVE = map_config.EVENT_LEAVE
 
 local npc_id_counter = 1
 
--- 辅助函数：处理 AOI 事件
+-- 辅助函数：处理 AOI 事件 (Helper function: handle AOI events)
 local function handle_aoi_events()
     local events = {}
-    -- 获取事件列表
+    -- 获取事件列表 (Get event list)
     local count = aoi_space:update_event(events)
     
     skynet.error("AOI events count:", count or 0)
     
     if count and count > 0 then
+        -- 用于去重的表 (Table for deduplication)
+        local sent_events = {}
+        
         -- 事件格式：[watcher, marker, type, watcher, marker, type, ...]
+        -- Event format: [watcher, marker, type, watcher, marker, type, ...]
         for i = 1, count, 3 do
             local watcher_id = events[i]
             local marker_id = events[i+1]
             local event_type = events[i+2]
             
+            -- 创建事件唯一键用于去重 (Create unique key for deduplication)
+            local event_key = string.format("%d_%d_%d", watcher_id, marker_id, event_type)
+            
+            -- 如果已经处理过这个事件，跳过 (Skip if already processed)
+            if sent_events[event_key] then
+                goto continue
+            end
+            sent_events[event_key] = true
+            
             skynet.error("AOI event:", watcher_id, "sees", marker_id, "type:", event_type)
 
             -- 我们只关心把消息发给 watcher (观察者)
+            -- We only care about sending messages to watchers
             local watcher_agent = agents[watcher_id]
             if watcher_agent then
                 if event_type == EVENT_ENTER then
                     -- 这里的 marker 可能是 NPC 也可能是其他玩家
+                    -- The marker could be an NPC or another player
                     local ent = entities[marker_id]
                     if ent then
                         local msg = { cmd = "aoi_add", entity = ent }
@@ -57,11 +72,14 @@ local function handle_aoi_events()
                     end
                 elseif event_type == EVENT_LEAVE then
                     local msg = { cmd = "aoi_remove", id = marker_id }
+                    skynet.error("Sending aoi_remove to", watcher_id, "for", marker_id)
                     skynet.send(watcher_agent, "lua", "send", yyjson.encode(msg))
                 end
             else
                 skynet.error("Watcher agent not found for watcher_id:", watcher_id)
             end
+            
+            ::continue::
         end
     end
 end
