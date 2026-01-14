@@ -1,25 +1,26 @@
 local skynet = require "skynet"
 local yyjson = require "yyjson"
 local aoi = require "aoi" -- 加载你的 C 模块
+local map_config = require "map_config" -- 加载地图配置 (Load map configuration)
 
 local CMD = {}
 local agents = {}      -- player_id -> agent_handle
 local entities = {}    -- player_id/npc_id -> data
 local aoi_space        
 
--- 地图配置
-local MAP_WIDTH = 2000
-local MAP_HEIGHT = 2000
-local TILE_SIZE = 50   -- 网格大小 (2000/50 = 40x40网格)
-local VIEW_WIDTH = 400 -- 视野宽
-local VIEW_HEIGHT = 400-- 视野高
+-- 从配置文件加载参数 (Load parameters from config file)
+local MAP_WIDTH = map_config.MAP_WIDTH
+local MAP_HEIGHT = map_config.MAP_HEIGHT
+local TILE_SIZE = map_config.TILE_SIZE
+local VIEW_WIDTH = map_config.VIEW_WIDTH
+local VIEW_HEIGHT = map_config.VIEW_HEIGHT
 
--- AOI 常量 (根据你的文档)
-local MODE_WATCHER = 1
-local MODE_MARKER = 2
-local MODE_BOTH = 3
-local EVENT_ENTER = 1
-local EVENT_LEAVE = 2
+-- AOI 常量 (AOI constants)
+local MODE_WATCHER = map_config.MODE_WATCHER
+local MODE_MARKER = map_config.MODE_MARKER
+local MODE_BOTH = map_config.MODE_BOTH
+local EVENT_ENTER = map_config.EVENT_ENTER
+local EVENT_LEAVE = map_config.EVENT_LEAVE
 
 local npc_id_counter = 1
 
@@ -68,34 +69,36 @@ end
 function CMD.init()
     if aoi_space then return end
 
-    -- 1. 初始化 AOI 空间
+    -- 1. 初始化 AOI 空间 (Initialize AOI space)
     -- 参数: x, y, map_size, tile_size
     aoi_space = aoi.new(0, 0, MAP_WIDTH, TILE_SIZE) 
     
-    -- 开启调试 (可选，如果太吵可以关掉)
-    -- aoi_space:enable_debug(true)
+    -- 启用离开事件 (Enable leave events) - 重要！必须启用才能清理离线玩家
+    -- Important! Must be enabled to clean up disconnected players
+    aoi_space:enable_leave_event(map_config.ENABLE_LEAVE_EVENT)
+    
+    -- 开启调试 (Enable debug) - 可选
+    if map_config.ENABLE_AOI_DEBUG then
+        aoi_space:enable_debug(true)
+    end
 
-    local npcs = {
-        {x=200, y=200, name="Guard"},
-        {x=400, y=300, name="Villager"},
-        {x=600, y=200, name="Merchant"}
-    }
-
-    for _, info in ipairs(npcs) do
+    -- 从配置文件加载 NPC (Load NPCs from config file)
+    for _, info in ipairs(map_config.NPCS) do
         local id = npc_id_counter
         npc_id_counter = npc_id_counter + 1
         
         entities[id] = {
             id = id,
-            type = "npc",
+            type = info.type,
             x = info.x,
             y = info.y,
             name = info.name
         }
         
-        -- 2. 插入 NPC
+        -- 2. 插入 NPC (Insert NPC)
         -- API: insert(handle, x, y, view_w, view_h, layer, mode)
         -- NPC 只是标记者 (MODE_MARKER)，视野宽高设为 0
+        -- NPCs are only markers (MODE_MARKER), view width/height set to 0
         aoi_space:insert(id, info.x, info.y, 0, 0, 0, MODE_MARKER)
     end
     skynet.error("Scene initialized. NPCs loaded.")
@@ -104,7 +107,9 @@ end
 function CMD.enter(agent_handle, player_id)
     agents[player_id] = agent_handle
     
-    local x, y = math.random(100, 300), math.random(100, 300)
+    -- 使用配置文件中的生成范围 (Use spawn range from config file)
+    local x = math.random(map_config.SPAWN_MIN_X, map_config.SPAWN_MAX_X)
+    local y = math.random(map_config.SPAWN_MIN_Y, map_config.SPAWN_MAX_Y)
     
     entities[player_id] = {
         id = player_id,
@@ -113,7 +118,7 @@ function CMD.enter(agent_handle, player_id)
         y = y
     }
 
-    -- 发送玩家自己的信息
+    -- 发送玩家自己的信息 (Send player's own info)
     local self_info = {
         cmd = "self_info",
         data = entities[player_id]
@@ -122,13 +127,15 @@ function CMD.enter(agent_handle, player_id)
     skynet.error("Sending self_info to player", player_id, ":", json_msg)
     skynet.send(agent_handle, "lua", "send", json_msg)
 
-    -- 3. 插入玩家
+    -- 3. 插入玩家 (Insert player)
     -- 玩家既看别人也被别人看 (MODE_BOTH)
+    -- Players can both watch and be watched (MODE_BOTH)
     -- 视野范围 VIEW_WIDTH x VIEW_HEIGHT
-    skynet.error("Inserting player into AOI:", player_id, x, y)
+    -- View range VIEW_WIDTH x VIEW_HEIGHT
+    skynet.error("Inserting player into AOI:", player_id, x, y, "view:", VIEW_WIDTH, "x", VIEW_HEIGHT)
     aoi_space:insert(player_id, x, y, VIEW_WIDTH, VIEW_HEIGHT, 0, MODE_BOTH)
     
-    -- 4. 处理插入后产生的 Enter 事件
+    -- 4. 处理插入后产生的 Enter 事件 (Handle Enter events after insertion)
     skynet.error("Handling AOI events for player:", player_id)
     handle_aoi_events()
     
@@ -164,9 +171,10 @@ local function broadcast_move(who_id, x, y)
     end
 end
 
--- Collision detection constants
-local ENTITY_SIZE = 40  -- Size of player/NPC hitbox (matches client rectangle size)
-local COLLISION_DISTANCE = ENTITY_SIZE  -- Minimum distance between entities
+-- 碰撞检测常量 (Collision detection constants)
+local ENTITY_SIZE = map_config.ENTITY_SIZE
+local COLLISION_DISTANCE = map_config.COLLISION_DISTANCE
+local BOUNDARY_BUFFER = map_config.BOUNDARY_BUFFER
 
 -- Check if a position collides with any entity
 -- Note: For production with many entities, consider using spatial partitioning
@@ -193,9 +201,10 @@ function CMD.move(player_id, x, y)
     local p = entities[player_id]
     if not p then return end
 
-    -- Check map boundaries
-    if x < 20 or x > MAP_WIDTH - 20 or y < 20 or y > MAP_HEIGHT - 20 then
-        -- Out of bounds - send correction to client
+    -- 检查地图边界 (Check map boundaries)
+    if x < BOUNDARY_BUFFER or x > MAP_WIDTH - BOUNDARY_BUFFER or 
+       y < BOUNDARY_BUFFER or y > MAP_HEIGHT - BOUNDARY_BUFFER then
+        -- 超出边界 - 发送位置校正给客户端 (Out of bounds - send correction to client)
         local correction_msg = {
             cmd = "entity_move",
             id = player_id,
@@ -209,10 +218,10 @@ function CMD.move(player_id, x, y)
         return
     end
 
-    -- Check collision with other entities
+    -- 检查与其他实体的碰撞 (Check collision with other entities)
     local has_collision, collided_with = check_collision(player_id, x, y)
     if has_collision then
-        -- Collision detected - send position correction back to client
+        -- 检测到碰撞 - 发送位置校正给客户端 (Collision detected - send correction to client)
         skynet.error("Collision detected for player", player_id, "with entity", collided_with)
         local correction_msg = {
             cmd = "entity_move",
@@ -227,18 +236,18 @@ function CMD.move(player_id, x, y)
         return
     end
 
-    -- 1. 更新内存数据
+    -- 1. 更新内存数据 (Update memory data)
     p.x = x
     p.y = y
 
-    -- 2. 更新 AOI 位置
+    -- 2. 更新 AOI 位置 (Update AOI position)
     -- API: update(handle, x, y, view_w, view_h, layer)
     aoi_space:update(player_id, x, y, VIEW_WIDTH, VIEW_HEIGHT, 0)
 
-    -- 3. 处理 AOI 产生的 Enter/Leave 事件 (比如走太远看不见了)
+    -- 3. 处理 AOI 产生的 Enter/Leave 事件 (Handle AOI Enter/Leave events)
     handle_aoi_events()
 
-    -- 4. 【新增】广播移动消息给视野内的人 (包括自己，这样客户端位置会被服务器修正)
+    -- 4. 广播移动消息给视野内的人 (Broadcast move message to nearby players)
     broadcast_move(player_id, x, y)
 end
 
@@ -247,14 +256,16 @@ end
 function CMD.leave(player_id)
     if not entities[player_id] then return end
     
-    -- 7. 移除对象
+    -- 7. 移除对象 (Remove object)
     -- API: erase(handle)
-    -- 移除时会自动触发 Leave 事件给周围的人
+    -- 移除时会自动触发 Leave 事件给周围的人 (Automatically triggers Leave events)
+    skynet.error("Player leaving:", player_id)
     aoi_space:erase(player_id)
     handle_aoi_events()
 
     agents[player_id] = nil
     entities[player_id] = nil
+    skynet.error("Player removed:", player_id)
 end
 
 skynet.start(function()
